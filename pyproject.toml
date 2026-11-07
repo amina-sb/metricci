@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "metricci"
+version = "0.1.0"
+description = "Bootstrap confidence intervals and paired permutation tests for ML evaluation metrics."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "amina" }]
+keywords = ["bootstrap", "confidence interval", "BCa", "AUC", "permutation test", "evaluation"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Intended Audience :: Science/Research",
+]
+dependencies = ["numpy>=1.24", "scipy>=1.10"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "hypothesis>=6", "scikit-learn>=1.2", "ruff>=0.4", "mypy>=1.8"]
+
+[project.urls]
+Source = "https://github.com/amina-sb/metricci"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/metricci"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: simulation tests that take more than a few seconds"]
+
+[tool.ruff]
+line-length = 99
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "NPY", "RUF"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests", "scripts"]
+
+[[tool.mypy.overrides]]
+module = ["sklearn.*", "scipy.*"]
+ignore_missing_imports = true
