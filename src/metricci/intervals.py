@@ -58,12 +58,20 @@ def lift_ci(
     y_score: ArrayLike,
     k: float = 0.1,
     *,
-    method: Method = "bca",
+    method: Method = "percentile",
     n_resamples: int = 2000,
     confidence: float = 0.95,
     random_state: Seed = None,
 ) -> CIResult:
-    """Bootstrap CI for lift in the top fraction ``k``, stratified by class."""
+    """Bootstrap CI for lift in the top fraction ``k``, stratified by class.
+
+    Defaults to the percentile interval, not BCa. Lift takes few distinct
+    values on small samples and is capped at ``1 / base rate`` (every top-k row
+    positive). When the estimate hits that cap the bootstrap distribution
+    cannot exceed it, BCa's bias correction pushes both endpoints to the cap,
+    and the interval misses the truth. The lift table in the README measures
+    the effect.
+    """
     y = np.asarray(y_true)
 
     def stat(t: FloatArray, s: FloatArray) -> float | FloatArray:

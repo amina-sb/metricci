@@ -64,3 +64,8 @@ def test_auc_interval_coverage_by_simulation(method: Method) -> None:
         hits += res.low <= true_auc <= res.high
     coverage = hits / reps
     assert 0.91 <= coverage <= 0.985, coverage
+
+
+def test_lift_ci_defaults_to_percentile() -> None:
+    y, s = _binormal(np.random.default_rng(3), 60, 140, 1.0)
+    assert lift_ci(y, s, random_state=0).method == "percentile"
