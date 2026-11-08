@@ -7,12 +7,15 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
+from numpy.typing import NDArray
 from sklearn.metrics import f1_score, roc_auc_score
 
 from metricci import f1, lift_at_k, roc_auc
 
+Problem = tuple[NDArray[np.int64], NDArray[np.float64]]
 
-def _binary_problem(draw: st.DrawFn, min_size: int = 4) -> tuple[np.ndarray, np.ndarray]:
+
+def _binary_problem(draw: st.DrawFn, min_size: int = 4) -> Problem:
     n = draw(st.integers(min_size, 60))
     y = draw(arrays(np.int64, n, elements=st.integers(0, 1)))
     if y.min() == y.max():  # guarantee both classes
@@ -26,13 +29,13 @@ binary = st.composite(_binary_problem)
 
 
 @given(binary())
-def test_auc_matches_sklearn(problem: tuple[np.ndarray, np.ndarray]) -> None:
+def test_auc_matches_sklearn(problem: Problem) -> None:
     y, s = problem
     assert roc_auc(y, s) == pytest.approx(roc_auc_score(y, s), abs=1e-12)
 
 
 @given(binary())
-def test_auc_is_bounded_and_antisymmetric(problem: tuple[np.ndarray, np.ndarray]) -> None:
+def test_auc_is_bounded_and_antisymmetric(problem: Problem) -> None:
     y, s = problem
     a = float(roc_auc(y, s))
     assert 0.0 <= a <= 1.0
@@ -40,13 +43,13 @@ def test_auc_is_bounded_and_antisymmetric(problem: tuple[np.ndarray, np.ndarray]
 
 
 @given(binary())
-def test_auc_invariant_to_monotone_transform(problem: tuple[np.ndarray, np.ndarray]) -> None:
+def test_auc_invariant_to_monotone_transform(problem: Problem) -> None:
     y, s = problem
     assert float(roc_auc(y, np.exp(s / 3))) == pytest.approx(float(roc_auc(y, s)), abs=1e-12)
 
 
 @given(binary(), st.integers(0, 2**32 - 1))
-def test_auc_invariant_to_row_order(problem: tuple[np.ndarray, np.ndarray], seed: int) -> None:
+def test_auc_invariant_to_row_order(problem: Problem, seed: int) -> None:
     y, s = problem
     perm = np.random.default_rng(seed).permutation(len(y))
     assert float(roc_auc(y[perm], s[perm])) == pytest.approx(float(roc_auc(y, s)), abs=1e-12)
@@ -57,7 +60,7 @@ def test_auc_without_both_classes_is_nan() -> None:
 
 
 @given(binary())
-def test_f1_matches_sklearn(problem: tuple[np.ndarray, np.ndarray]) -> None:
+def test_f1_matches_sklearn(problem: Problem) -> None:
     y, s = problem
     pred = (s > 0).astype(int)
     assert f1(y, pred) == pytest.approx(f1_score(y, pred, zero_division=0), abs=1e-12)
@@ -68,7 +71,7 @@ def test_f1_with_no_positives_anywhere_is_zero() -> None:
 
 
 @given(binary(), st.floats(0.05, 1.0))
-def test_lift_matches_explicit_loop(problem: tuple[np.ndarray, np.ndarray], k: float) -> None:
+def test_lift_matches_explicit_loop(problem: Problem, k: float) -> None:
     y, s = problem
     top = max(1, math.ceil(k * len(y)))
     # Reference: walk rows in stable descending-score order.
@@ -93,7 +96,7 @@ def test_lift_rejects_bad_k() -> None:
 
 @settings(max_examples=30)
 @given(binary())
-def test_stacked_rows_equal_single_calls(problem: tuple[np.ndarray, np.ndarray]) -> None:
+def test_stacked_rows_equal_single_calls(problem: Problem) -> None:
     y, s = problem
     rng = np.random.default_rng(0)
     idx = np.stack([rng.permutation(len(y)) for _ in range(4)])
