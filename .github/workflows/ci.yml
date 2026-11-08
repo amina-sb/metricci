@@ -21,7 +21,7 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy
-      - run: pytest -q
+      - run: pytest -q -m "not evidence"
 
   evidence:
     runs-on: ubuntu-latest

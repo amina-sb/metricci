@@ -18,10 +18,12 @@
 - [x] Size and power measured by simulation
 
 ## Phase 4 — Evidence beyond the easy case
-- [ ] Coverage at heavy class imbalance (1% and 5% positives)
-- [ ] Coverage when the true AUC is near 1
-- [ ] DeLong interval and test as a second closed-form baseline
-- [ ] Coverage for lift at k
+- [x] Coverage at heavy class imbalance (1% and 5% positives)
+- [x] Coverage when the true AUC is near 1
+- [x] DeLong interval and test as a second closed-form baseline
+- [x] Coverage for lift at k
+- [x] Percentile default for lift; warning when BCa sits on a bootstrap edge
+- [ ] An interval that reaches nominal coverage with ~10 positives
 
 ## Phase 5 — More metrics
 - [ ] Precision and recall at a threshold, average precision
@@ -29,5 +31,5 @@
 - [ ] Regression metrics (MAE, RMSE, R²)
 
 ## Phase 6 — Distribution
-- [ ] Documentation site
+- [x] Documentation site
 - [ ] First PyPI release

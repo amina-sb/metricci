@@ -29,7 +29,10 @@ packages = ["src/metricci"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["slow: simulation tests that take more than a few seconds"]
+markers = [
+    "slow: simulation tests that take more than a few seconds",
+    "evidence: regenerates the README evidence tables (several minutes)",
+]
 
 [tool.ruff]
 line-length = 99

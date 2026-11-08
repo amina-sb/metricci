@@ -15,22 +15,38 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.optimize import brentq
 from scipy.special import expit
 from scipy.stats import norm
 
-from metricci import CIResult, auc_ci, f1_ci, hanley_mcneil_ci, paired_permutation_test, roc_auc
+from metricci import (
+    CIResult,
+    auc_ci,
+    delong_ci,
+    f1_ci,
+    hanley_mcneil_ci,
+    lift_ci,
+    paired_permutation_test,
+    roc_auc,
+)
+from metricci._bootstrap import BootstrapWarning
 
 SEP = 1.0  # positives ~ N(SEP, 1), negatives ~ N(0, 1)
 THRESHOLD = 0.5  # hard predictions for F1: score > THRESHOLD
 SIZES = ((12, 28), (60, 140))  # (positives, negatives)
 SEEDS = (11, 12, 13, 14, 15)
 REPS_PER_SEED = 80
+HARD_REPS_PER_SEED = 80
+LIFT_K = 0.1
+# (positives, negatives, separation): rare positives, and true AUC near 1
+HARD = ((10, 990, SEP), (50, 950, SEP), (60, 140, 3.0))
 N_RESAMPLES = 999
 README = Path(__file__).resolve().parent.parent / "README.md"
 START, END = "<!-- evidence:start -->", "<!-- evidence:end -->"
@@ -39,8 +55,8 @@ IntArray = NDArray[np.int64]
 FloatArray = NDArray[np.float64]
 
 
-def true_auc() -> float:
-    return float(norm.cdf(SEP / math.sqrt(2)))
+def true_auc(sep: float = SEP) -> float:
+    return float(norm.cdf(sep / math.sqrt(2)))
 
 
 def true_f1(n_pos: int, n_neg: int) -> float:
@@ -51,9 +67,24 @@ def true_f1(n_pos: int, n_neg: int) -> float:
     return float(2 * tp / (2 * tp + fp + fn))
 
 
-def draw(rng: np.random.Generator, n_pos: int, n_neg: int) -> tuple[IntArray, FloatArray]:
+def true_lift(n_pos: int, n_neg: int, k: float = LIFT_K) -> float:
+    """Population lift in the top fraction k: find the score threshold t above
+    which a fraction k of the population lies, then divide the positive share
+    above t by the base rate."""
+    pi = n_pos / (n_pos + n_neg)
+
+    def above(t: float) -> float:
+        return float(pi * norm.sf(t - SEP) + (1 - pi) * norm.sf(t)) - k
+
+    t = brentq(above, -10, 10)
+    return float(norm.sf(t - SEP) / k)
+
+
+def draw(
+    rng: np.random.Generator, n_pos: int, n_neg: int, sep: float = SEP
+) -> tuple[IntArray, FloatArray]:
     y = np.r_[np.ones(n_pos, dtype=np.int64), np.zeros(n_neg, dtype=np.int64)]
-    s = np.r_[rng.normal(SEP, 1, n_pos), rng.normal(0, 1, n_neg)]
+    s = np.r_[rng.normal(sep, 1, n_pos), rng.normal(0, 1, n_neg)]
     return y, s
 
 
@@ -66,14 +97,15 @@ def wilson(hits: int, n: int, z: float = 1.959964) -> tuple[float, float]:
 
 @dataclass
 class Tally:
+    reps_per_seed: int
     hits: list[int]
     widths: list[float]
 
     def row(self, label: str, method: str) -> str:
         total = sum(self.hits)
-        n = len(SEEDS) * REPS_PER_SEED
+        n = len(SEEDS) * self.reps_per_seed
         lo, hi = wilson(total, n)
-        per_seed = [h / REPS_PER_SEED for h in self.hits]
+        per_seed = [h / self.reps_per_seed for h in self.hits]
         return (
             f"| {label} | {method} | {total / n:.3f} ({lo:.3f}-{hi:.3f}) "
             f"| {min(per_seed):.3f}-{max(per_seed):.3f} | {np.mean(self.widths):.3f} |"
@@ -83,13 +115,21 @@ class Tally:
 Builder = Callable[[IntArray, FloatArray, np.random.Generator], CIResult]
 
 
-def coverage(builders: dict[str, Builder], n_pos: int, n_neg: int, truth: float) -> list[str]:
-    tallies = {m: Tally([], []) for m in builders}
+def coverage(
+    builders: dict[str, Builder],
+    n_pos: int,
+    n_neg: int,
+    truth: float,
+    sep: float = SEP,
+    reps_per_seed: int = REPS_PER_SEED,
+    label: str | None = None,
+) -> list[str]:
+    tallies = {m: Tally(reps_per_seed, [], []) for m in builders}
     for seed in SEEDS:
         rng = np.random.default_rng(seed)
         counts = dict.fromkeys(builders, 0)
-        for _ in range(REPS_PER_SEED):
-            y, s = draw(rng, n_pos, n_neg)
+        for _ in range(reps_per_seed):
+            y, s = draw(rng, n_pos, n_neg, sep)
             rep_seed = int(rng.integers(2**31))
             for m, build in builders.items():
                 res = build(y, s, np.random.default_rng(rep_seed))
@@ -97,13 +137,14 @@ def coverage(builders: dict[str, Builder], n_pos: int, n_neg: int, truth: float)
                 tallies[m].widths.append(res.high - res.low)
         for m in builders:
             tallies[m].hits.append(counts[m])
-    label = f"n = {n_pos + n_neg} ({n_pos} pos)"
+    label = label or f"n = {n_pos + n_neg} ({n_pos} pos)"
     return [t.row(label, m) for m, t in tallies.items()]
 
 
 def auc_table() -> list[str]:
     builders: dict[str, Builder] = {
         "Hanley-McNeil (baseline)": lambda y, s, r: hanley_mcneil_ci(y, s),
+        "DeLong (baseline)": lambda y, s, r: delong_ci(y, s),
         "percentile": lambda y, s, r: auc_ci(
             y, s, method="percentile", n_resamples=N_RESAMPLES, random_state=r
         ),
@@ -115,6 +156,37 @@ def auc_table() -> list[str]:
     rows = []
     for n_pos, n_neg in SIZES:
         rows += coverage(builders, n_pos, n_neg, true_auc())
+    return rows
+
+
+def hard_auc_table() -> list[str]:
+    builders: dict[str, Builder] = {
+        "Hanley-McNeil (baseline)": lambda y, s, r: hanley_mcneil_ci(y, s),
+        "DeLong (baseline)": lambda y, s, r: delong_ci(y, s),
+        "percentile": lambda y, s, r: auc_ci(
+            y, s, method="percentile", n_resamples=N_RESAMPLES, random_state=r
+        ),
+        "BCa": lambda y, s, r: auc_ci(y, s, method="bca", n_resamples=N_RESAMPLES, random_state=r),
+    }
+    rows = []
+    for n_pos, n_neg, sep in HARD:
+        n = n_pos + n_neg
+        label = f"n = {n:,}, {n_pos} pos, AUC {true_auc(sep):.3f}"
+        rows += coverage(builders, n_pos, n_neg, true_auc(sep), sep, HARD_REPS_PER_SEED, label)
+    return rows
+
+
+def lift_table() -> list[str]:
+    def make(method: str) -> Builder:
+        return lambda y, s, r: lift_ci(
+            y, s, LIFT_K, method=method,  # type: ignore[arg-type]
+            n_resamples=N_RESAMPLES, random_state=r,
+        )  # fmt: skip
+
+    builders = {m: make(m.lower()) for m in ("percentile", "basic", "BCa")}
+    rows = []
+    for n_pos, n_neg in SIZES:
+        rows += coverage(builders, n_pos, n_neg, true_lift(n_pos, n_neg))
     return rows
 
 
@@ -175,6 +247,19 @@ def render() -> str:
         rule,
         *f1_table(),
         "",
+        f"**AUC in harder regimes**: rare positives (separation {SEP}) and a near-perfect "
+        f"model (separation 3). {len(SEEDS) * HARD_REPS_PER_SEED} data sets per row.",
+        "",
+        head,
+        rule,
+        *hard_auc_table(),
+        "",
+        f"**Lift at k = {LIFT_K}**, true value {true_lift(*SIZES[0]):.4f} (positive rate 0.3).",
+        "",
+        head,
+        rule,
+        *lift_table(),
+        "",
         "**Paired permutation test** for an AUC difference, 200 data sets per row, "
         "n = 200, 499 permutations, rejection rate at alpha = 0.05.",
         "",
@@ -186,6 +271,9 @@ def render() -> str:
 
 
 def main() -> int:
+    # BCa's boundary warning fires on many lift data sets by design; the table
+    # measures the consequence, so it is silenced here.
+    warnings.simplefilter("ignore", BootstrapWarning)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="compare with README.md")
     args = parser.parse_args()
