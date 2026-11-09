@@ -8,6 +8,7 @@ Bootstrap*, 1993, eq. 14.15).
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
@@ -21,6 +22,13 @@ FloatArray = NDArray[np.float64]
 Statistic = Callable[..., float | FloatArray]
 
 _METHODS: tuple[str, ...] = ("percentile", "basic", "bca")
+#: Share of resamples tied with an estimate at the edge of the bootstrap
+#: distribution above which BCa is flagged as unreliable.
+BOUNDARY_ATOM = 0.25
+
+
+class BootstrapWarning(UserWarning):
+    """The requested interval is known to be unreliable for this data."""
 
 
 @dataclass(frozen=True)
@@ -203,6 +211,16 @@ def bootstrap_ci(
         ql, qh = np.quantile(boot, [alpha / 2, 1 - alpha / 2])
         low, high = 2 * theta_hat - float(qh), 2 * theta_hat - float(ql)
     else:
+        at_edge = theta_hat >= boot.max() or theta_hat <= boot.min()
+        if at_edge and np.mean(boot == theta_hat) >= BOUNDARY_ATOM:
+            warnings.warn(
+                "the estimate sits on an edge of the bootstrap distribution with "
+                f"{np.mean(boot == theta_hat):.0%} of resamples tied to it (e.g. lift "
+                "with every top-k row positive); BCa then collapses towards the edge "
+                "and under-covers. Use method='percentile'.",
+                BootstrapWarning,
+                stacklevel=2,
+            )
         z0 = bca_bias_correction(theta_hat, boot)
         acc = bca_acceleration(_jackknife(statistic, data, vectorized, batch))
         pl, ph = bca_quantiles(z0, acc, alpha)

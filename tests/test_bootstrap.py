@@ -120,3 +120,28 @@ def test_nonfinite_statistic_points_to_strata() -> None:
 
     with pytest.raises(ValueError, match="strata"):
         bootstrap_ci(needs_both, y, n_resamples=500, random_state=0)
+
+
+def test_bca_warns_when_estimate_is_on_the_edge_of_the_bootstrap() -> None:
+    # Every top-k row positive: lift sits at its cap of 1 / base rate, and no
+    # resample can exceed it.
+    from metricci import lift_at_k
+    from metricci._bootstrap import BootstrapWarning
+
+    y = np.r_[np.ones(12, dtype=np.int64), np.zeros(28, dtype=np.int64)]
+    # The six best-scored rows are positive; the other positives mix with negatives.
+    s = np.r_[np.linspace(10, 9, 6), np.linspace(1, 0, 6), np.linspace(1.05, 0.05, 28)]
+
+    def lift(t: NDArray[np.float64], u: NDArray[np.float64]) -> NDArray[np.float64]:
+        return np.asarray(lift_at_k(t, u, 0.1), dtype=np.float64)
+
+    with pytest.warns(BootstrapWarning, match="percentile"):
+        bootstrap_ci(lift, y, s, strata=y, vectorized=True, random_state=0)
+
+
+def test_bca_is_silent_on_a_smooth_statistic(skewed: NDArray[np.float64]) -> None:
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        bootstrap_ci(_mean_v, skewed, vectorized=True, random_state=0)

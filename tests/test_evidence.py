@@ -23,12 +23,22 @@ def test_closed_form_truths_match_a_large_sample() -> None:
     assert float(f1(y, pred)) == pytest.approx(evidence.true_f1(60, 140), abs=0.003)
 
 
+def test_true_lift_matches_large_samples() -> None:
+    from metricci import lift_at_k
+
+    values = [
+        float(lift_at_k(*evidence.draw(np.random.default_rng(k), 60_000, 140_000), 0.1))
+        for k in range(4)
+    ]
+    assert float(np.mean(values)) == pytest.approx(evidence.true_lift(60, 140), abs=0.015)
+
+
 def test_wilson_interval_contains_proportion() -> None:
     lo, hi = evidence.wilson(380, 400)
     assert lo < 0.95 < hi
 
 
-@pytest.mark.slow
+@pytest.mark.evidence
 def test_readme_table_is_reproduced() -> None:
     proc = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "evidence.py"), "--check"],
